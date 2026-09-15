@@ -1966,7 +1966,24 @@ function executeSearch() {
     );
 
 
-  if (sameResult) {
+  /*
+    複数メーカーを1つにまとめるのは、
+    「同じ具体性の同じパターン」に一致し、
+    かつ6項目の結果も完全に同じ場合だけ。
+
+    パターンの具体性が違う候補を「A ／ B」とまとめると、
+    先頭メーカーの内容だけが表示される危険がある。
+    そのため、この場合はメーカー選択にする。
+  */
+  const firstPattern = groups[0].pattern;
+
+  const samePattern =
+    groups.every(
+      group =>
+        group.pattern === firstPattern
+    );
+
+  if (sameResult && samePattern) {
 
     showResult(
       groups[0].vehicle,
@@ -2314,6 +2331,8 @@ async function loadVehicleData() {
 
     const data =
       await response.json();
+
+    window.vehicleJsonVersion = data?.version ?? "不明";
 
 
     if (
