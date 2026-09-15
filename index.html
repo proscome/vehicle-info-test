@@ -1190,75 +1190,104 @@ function provisionalCandidates(model) {
    最終一致
    ========================================== */
 
+function patternSpecificity(pattern) {
+
+  const pat = String(pattern ?? "");
+
+  let fixedChars = 0;
+  let wildcardCount = 0;
+  let classCount = 0;
+
+  for (let i = 0; i < pat.length; i++) {
+    const c = pat[i];
+
+    if (c === "*") {
+      wildcardCount++;
+    }
+    else if (c === "?" || c === "#") {
+      wildcardCount++;
+    }
+    else if (c === "[") {
+      classCount++;
+      const close = pat.indexOf("]", i + 1);
+      if (close >= 0) i = close;
+    }
+    else {
+      fixedChars++;
+    }
+  }
+
+  return fixedChars * 100 - wildcardCount * 20 - classCount * 10;
+}
+
+
 function exactMatches(model) {
 
-  let kata =
-    normalizeModelInput(model);
+  let kata = normalizeModelInput(model);
 
-
-  if (
-    kata === "不明" ||
-    kata === ""
-  ) {
-
+  if (kata === "不明" || kata === "") {
     kata = "-";
-
   }
-
-
-  const groups =
-    new Map();
-
 
   /*
-    JSONの上から順番に調べる。
+    まず「一致したパターン」の中から、
+    最も具体的なパターンを探す。
 
-    同一メーカーでは最初に一致した
-    レコードを採用する。
+    重要：メーカーごとに最も具体的なものを残すのではなく、
+    全メーカーを通して最も具体的な一致だけを最終候補にする。
 
-    これは元VBAの
-    Exit For
-    と同じ考え方。
+    例えば
+      A社 : FRR90-*
+      B社 : *-*
+      C社 : FRR90E4-*
+
+    のような場合、入力が FRR90E4-xxxx なら、
+    *-* までメーカー候補に残してしまうと
+    「実質的な一致」ではないメーカーが増えてしまう。
+
+    そこで、最も具体的なパターンの一致だけを残す。
+    同じ具体性のパターンが複数メーカーに存在する場合は、
+    その複数メーカーを正規の候補として扱う。
   */
+  let bestSpecificity = -Infinity;
+  const bestCandidates = [];
 
   for (const vehicle of vehicles) {
+    const pattern = patternOf(vehicle);
 
-    if (
-      vbaLike(
-        kata,
-        patternOf(vehicle)
-      )
-    ) {
-
-      const manufacturer =
-        canonicalManufacturer(
-          vehicle.manufacturer
-        );
-
-
-      if (
-        !groups.has(manufacturer)
-      ) {
-
-        groups.set(
-          manufacturer,
-          {
-            manufacturer,
-            vehicle,
-            pattern: patternOf(vehicle),
-            signature: signatureOf(vehicle)
-          }
-        );
-
-      }
-
+    if (!vbaLike(kata, pattern)) {
+      continue;
     }
 
+    const specificity = patternSpecificity(pattern);
+
+    if (specificity > bestSpecificity) {
+      bestSpecificity = specificity;
+      bestCandidates.length = 0;
+    }
+
+    if (specificity === bestSpecificity) {
+      bestCandidates.push({
+        manufacturer: canonicalManufacturer(vehicle.manufacturer),
+        vehicle,
+        pattern,
+        signature: signatureOf(vehicle),
+        specificity
+      });
+    }
   }
 
+  /* 同一メーカーで同じ具体性のレコードが複数ある場合は
+     JSONの先頭側を採用し、メーカーを重複させない。 */
+  const bestByManufacturer = new Map();
 
-  return [...groups.values()];
+  for (const candidate of bestCandidates) {
+    if (!bestByManufacturer.has(candidate.manufacturer)) {
+      bestByManufacturer.set(candidate.manufacturer, candidate);
+    }
+  }
 
+  return [...bestByManufacturer.values()];
 }
 
 
@@ -1947,7 +1976,7 @@ function executeSearch() {
           group =>
             group.manufacturer
         )
-        .join(" または "),
+        .join(" ／ "),
       groups[0].pattern,
       "複数メーカーで一致し、検索結果が同一"
     );
